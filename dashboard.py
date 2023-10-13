@@ -1,56 +1,98 @@
 import streamlit as st
+import gspread
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
+from google.oauth2 import service_account
 
-@st.cache
-def load_data(file_path):
-    return pd.read_csv(file_path)
 
-def main():
-    st.title("Personal Health Dashboard")
 
-    file_path = st.file_uploader("Upload your personal data CSV file", type=["csv"])
-    if file_path is not None:
-        df = load_data(file_path)
-        st.dataframe(df)
+# Create a connection object.
+credentials = service_account.Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive", ],
+)
 
-        # Choose the header to plot
-        selected_header = st.selectbox("Select a header to plot over time", df.columns)
+gc = gspread.authorize(credentials)
 
-        # Plotting the selected header over time using Plotly
-        fig = px.line(df, x='Time of Measurement', y=selected_header)
-        st.plotly_chart(fig)
+# Open the Google Sheet by name
 
-        # Showing some statistics
-        st.write("### Personal Data Statistics")
-        st.write("Mean value: ", df[selected_header].mean())
-        st.write("Minimum value: ", df[selected_header].min())
-        st.write("Maximum value: ", df[selected_header].max())
+sheet = gc.open_by_key('1_doOck1fbnoIsvnVKjYLNWxcnDwk2IWpcXqyp4yuBPI').get_worksheet(2)
 
-    google_fit_path = st.file_uploader("Upload your Google Fit data CSV file", type=["csv"])
-    if google_fit_path is not None:
-        df_google_fit = load_data(google_fit_path)
-        st.dataframe(df_google_fit)
+# Get data from column A (metrics) and column B (questions)
+metrics_column = sheet.col_values(1)  # Assumes metrics are in column A
+questions_column = sheet.col_values(2)  # Assumes questions are in column B
+tips_column = sheet.col_values(3)  # Assumes questions are in column B
 
-        # Choose the header to plot
-        selected_header_google_fit = st.selectbox("Select a header to plot over time", df_google_fit.columns)
+for item in tips_column:
+    st.write(item)
 
-        # Plotting the selected header over time using Plotly
-        fig_google_fit = px.line(df_google_fit, x='Time of Measurement', y=selected_header_google_fit)
-        st.plotly_chart(fig_google_fit)
+# Create Dataframe
+data = {
+    'Metrics': metrics_column,
+    'Questions': questions_column
+}
 
-        # Showing some statistics
-        st.write("### Google Fit Data Statistics")
-        st.write("Mean value: ", df_google_fit[selected_header_google_fit].mean())
-        st.write("Minimum value: ", df_google_fit[selected_header_google_fit].min())
-        st.write("Maximum value: ", df_google_fit[selected_header_google_fit].max())
 
-        # 7-day moving average of heart points
-        df_google_fit['7-day avg heart points'] = df_google_fit['Heart Points'].rolling(window=7).mean()
-        fig_7day_avg = px.line(df_google_fit, x='Time of Measurement', y='7-day avg heart points')
-        st.plotly_chart(fig_7day_avg)
+df = pd.DataFrame(data)
 
-        # Count of days with more than 10,000 steps
-        df_google_fit['over_10000'] = df_google_fit['Steps'] >= 10000
-        fig_steps = px.bar(df_google_fit, x='Time of Measurement', y='over_10000', color='over_10000')
-       
+
+if len(df) > 0:
+
+    st.title("Review")
+
+    # List of metrics and questions
+    metrics = df['Metrics'].tolist()
+    questions = df['Questions'].tolist()
+
+    # Dictionary to store scores for each metric
+    scores = {}
+
+    # Loop through each metric and create a radio button selection for scores 1-5
+    for metric, question in zip(metrics, questions):
+        score = st.radio(f"{metric}", [1, 2, 3, 4, 5], horizontal=True)
+        scores[metric] = score
+
+    # Loop through questions and create text input fields
+    text_inputs = {}
+    for i, question in enumerate(questions):
+        text_inputs[question] = st.text_area(f"{question}")
+
+    # Creating a dictionary with data
+    data = {
+        'Date': datetime.now().strftime('%Y-%m-%d'),  # Putting date first
+        **scores,  # Unpacking the scores dictionary
+        **text_inputs  # Unpacking the text input fields
+    }
+
+    # Create a DataFrame with the collected data
+    result_df = pd.DataFrame([data])
+
+    # Display the DataFrame on the Streamlit app
+    st.write(result_df )
+
+    sheet = gc.open_by_key('1_doOck1fbnoIsvnVKjYLNWxcnDwk2IWpcXqyp4yuBPI').get_worksheet(3)
+    
+    with st.form(key='my_form'):
+        if st.form_submit_button(label="Submit"):
+            try:
+    
+                # Get the number of rows that have data
+                num_rows = len(sheet.get_all_values())
+    
+                # Calculate the starting cell for new data (considering the header is only added once)
+                start_cell = f"A{num_rows + 1}" if num_rows > 0 else "A1"
+    
+                # Append the data
+                if num_rows == 0:
+                    # If the sheet is empty, also include the headers
+                    sheet.update(start_cell, [result_df .columns.values.tolist()] + result_df .values.tolist())
+                else:
+                    # Otherwise, just append the data rows
+                    sheet.update(start_cell, result_df .values.tolist())
+    
+                    st.write(f"New data written to sheet")
+    
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
