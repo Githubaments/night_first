@@ -8,7 +8,7 @@ from google.oauth2 import service_account
 
 
 # Define the expected password
-expected_password = your_password
+expected_password = st.secrets["your_password"])
 
 # Streamlit app title
 st.title("Password-Protected Streamlit App")
