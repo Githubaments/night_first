@@ -22,6 +22,7 @@ if password == expected_password:
     # Put your app content here
 else:
     st.error("Access denied! Please enter the correct password.")
+    st.stop
 
 
 # Create a connection object.
